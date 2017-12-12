@@ -1,10 +1,5 @@
 #!/bin/bash
 
-PROFILE="wca_dev"
-REGION="eu-west-2"
-
-TYPE="ec2"
-
 function getVPCInformation {
 	echo
 	echo "Overview of VPC Contents:"
@@ -96,6 +91,14 @@ function runCommand {
 while [ ${#} -gt 0 ]
 do
 	case ${1} in
+		"-p"|"--profile")
+			PROFILE=${2}
+			shift
+			;;
+		"-r"|"--region")
+			REGION=${2}
+			shift
+			;;
 		"-t"|"--type")
 			TYPE=${2}
 			shift
@@ -103,6 +106,16 @@ do
 	esac
 	shift
 done
+
+if [ -z ${PROFILE} ] || [ -z ${REGION} ] || [ -z ${TYPE} ]
+then
+	echo
+	echo "ERROR: You must provide a profile, region and type"
+	echo
+	echo "E.g. ${0} -p myprofile -r eu-west-2 -t overview"
+	echo
+	exit 1
+fi
 
 case ${TYPE} in
 	"ec2")
