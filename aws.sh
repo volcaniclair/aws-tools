@@ -5,19 +5,91 @@ REGION="eu-west-2"
 
 TYPE="ec2"
 
+function getVPCInformation {
+	echo
+	echo "Overview of VPC Contents:"
+        echo
+        VPC_HEADER="VPC ID\tState\tDHCP Options ID\tCIDR Block"
+        #HEADER="${VPC_HEADER}"
+        COMMAND="ec2 describe-vpcs"
+        QUERY='Vpcs[*].[VpcId,State,DhcpOptionsId,CidrBlock]'
+        OUTPUT="text"
+        runCommand
+	#echo "${COMMAND_OUTPUT}"
+	#echo
+	OLDIFS=${IFS}
+	IFS=$'\n'
+	for LINE in ${COMMAND_OUTPUT}
+	do
+		VPCS+=( ${LINE} )
+	done
+	for VPC in ${VPCS[@]}
+	do
+		IFS=$'\n'
+		#echo -e "${VPC_HEADER}" | column -s$'\t' -t
+		#echo "${VPC}" | column -s$'\t' -t
+		#echo
+		VPC_ID=$( echo ${VPC} | awk -F'\t' '{ print $1 }' )
+		VPC_STATE=$( echo ${VPC} | awk -F'\t' '{ print $2 }' )
+		VPC_DHCP=$( echo ${VPC} | awk -F'\t' '{ print $3 }' )
+		VPC_CIDR=$( echo ${VPC} | awk -F'\t' '{ print $4 }' )
+		echo
+		echo "${VPC_ID}"
+		echo "-----"
+		echo -e "State:\t\t\t${VPC_STATE}"
+		echo -e "DHCP Options ID:\t${VPC_DHCP}"
+		echo -e "CIDR:\t\t\t${VPC_CIDR}"
+		echo
+		IFS=${OLDIFS}
+                HEADER="\tInstance ID\t\tName\tState\tPrivate IP\tPublic IP\tVPC ID"
+                COMMAND="ec2 describe-instances"
+                FILTER="Name=vpc-id,Values=${VPC_ID}"
+                QUERY="Reservations[*].Instances[*].[InstanceId,Tags[?Key==\`Name\`].Value|[0],State.Name,PrivateIpAddress,PublicIpAddress,VpcId]"
+                runCommand
+		INSTANCE_COUNT=0
+		IFS=$'\n'
+		for LINE in ${COMMAND_OUTPUT}
+		do
+			echo -e "\t${LINE}"
+			(( INSTANCE_COUNT+=1 ))
+		done
+                #echo -e "\t${COMMAND_OUTPUT}" | column -s$'\t' -t
+		echo
+		echo -e "\t${INSTANCE_COUNT} instances"
+		echo
+	done
+}
+
 function runCommand {
-	echo -e "${HEADER}"
-	if [ -z ${QUERY} ] && [ -z ${OUTPUT} ]
+	COMMAND_OUTPUT=""
+	if [[ "${HEADER}" != "" ]]
 	then
-	        aws --profile ${PROFILE} --region ${REGION} ${COMMAND}
-	elif [ -z ${QUERY} ]
+		echo -e "${HEADER}"
+	fi
+	if [ -z "${FILTER}" ] && [ -z "${QUERY}" ] && [ -z "${OUTPUT}" ]
 	then
-	        aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --output ${OUTPUT}
-	elif [ -z ${OUTPUT} ]
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} )
+	elif [ -z "${FILTER}" ] && [ -z "${QUERY}" ]
 	then
-	        aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --query ${QUERY}
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --output "${OUTPUT}" )
+	elif [ -z "${FILTER}" ] && [ -z "${OUTPUT}" ]
+	then
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --query "${QUERY}" )
+	elif [ -z "${QUERY}" ] && [ -z "${OUTPUT}" ]
+	then
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --filters "${FILTER}" )
+	elif [ -z "${FILTER}" ]
+	then
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --query "${QUERY}" --output "${OUTPUT}" )
+	elif [ -z "${QUERY}" ]
+	then
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --filters "${FILTER}" --output "${OUTPUT}" )
+	elif [ -z "${OUTPUT}" ]
+	then
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --filters "${FILTER}" --query "${QUERY}" )
 	else
-	        aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --query ${QUERY} --output ${OUTPUT}
+	        COMMAND_OUTPUT=$( aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --filters "${FILTER}" --query "${QUERY}" --output "${OUTPUT}" )
+	        #echo "aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --filters ${FILTER} --query ${QUERY} --output ${OUTPUT}"
 	fi
 }
 
@@ -36,11 +108,15 @@ case ${TYPE} in
 	"ec2")
 		echo "Instances:"
 		echo
-		HEADER="Instance ID\tName\tState\tPrivate IP\tPublic IP"
+		HEADER="Instance ID\tName\tState\tPrivate IP\tPublic IP\tVPC ID"
 		COMMAND="ec2 describe-instances"
-		QUERY='Reservations[*].Instances[*].[InstanceId,Tags[?Key==`Name`].Value|[0],State.Name,PrivateIpAddress,PublicIpAddress]'
+		#FILTER="Name=vpc-id,Values=vpc-075a716e"
+		QUERY='Reservations[*].Instances[*].[InstanceId,Tags[?Key==`Name`].Value|[0],State.Name,PrivateIpAddress,PublicIpAddress,VpcId]'
 		OUTPUT="text"
-		runCommand | column -s$'\t' -t
+		#OUTPUT="json"
+		#runCommand | column -s$'\t' -t
+		runCommand
+		echo "COMMAND_OUTPUT: ${COMMAND_OUTPUT}"
 		;;
 	"vpcs")
 		echo "VPCs:"
@@ -52,28 +128,14 @@ case ${TYPE} in
 		runCommand | column -s$'\t' -t
 		;;
 	"overview")
+		getVPCInformation
+		;;
+	*)
 		echo
-		${0} -t vpcs
+		echo "ERROR: Unknown type: ${TYPE}"
 		echo
-		${0} -t ec2
+		exit 1
 		;;
 esac
 
 exit 0
-
-
-echo -e "${HEADER}"
-#aws --profile ${PROFILE} --region ${REGION} ec2 describe-instances --query 'Reservations[*].Instances[*].[InstanceId,Tags[?Key==`Name`].Value|[0],State.Name,PrivateIpAddress,PublicIpAddress]' --output text
-#aws --profile ${PROFILE} --region ${REGION} ${COMMAND}
-if [ -z ${QUERY} ] && [ -z ${OUTPUT} ]
-then
-	aws --profile ${PROFILE} --region ${REGION} ${COMMAND}
-elif [ -z ${QUERY} ]
-then
-	aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --output ${OUTPUT}
-elif [ -z ${OUTPUT} ]
-then
-	aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --query ${QUERY}
-else
-	aws --profile ${PROFILE} --region ${REGION} ${COMMAND} --query ${QUERY} --output ${OUTPUT}
-fi
